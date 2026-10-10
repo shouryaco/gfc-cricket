@@ -80,6 +80,16 @@ export async function POST(request:Request){try{
     const sid=requireValue(p.sessionId,"Session"),pid=requireValue(p.playerId,"Player"),status=String(p.status);
     if(!["available","maybe","unavailable","withdrawn"].includes(status))throw new Error("Invalid availability.");
     await run("INSERT INTO availability (session_id,player_id,status,updated_at) VALUES (?,?,?,?) ON CONFLICT(session_id,player_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",sid,pid,status,now());await log(user.userId,"availability_changed",sid,{pid,status});
+  } else if(action==="availabilityBulk"){
+    const sid=requireValue(p.sessionId,"Session"),status=String(p.status);
+    if(!["available","maybe","unavailable","withdrawn"].includes(status))throw new Error("Invalid availability.");
+    if(!await one("SELECT id FROM sessions WHERE id=?",sid))throw new Error("Playing day not found.");
+    const active=await rows<{id:string}>("SELECT id FROM players WHERE active=1");
+    const selected=p.playerIds;
+    if(!Array.isArray(selected)||!selected.length||selected.length>active.length||!selected.every(x=>typeof x==="string")||new Set(selected).size!==selected.length||selected.some(x=>!active.some(a=>a.id===x)))throw new Error("Choose active players for this playing day.");
+    const timestamp=now();
+    await db().batch(selected.map(pid=>db().prepare("INSERT INTO availability (session_id,player_id,status,updated_at) VALUES (?,?,?,?) ON CONFLICT(session_id,player_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at").bind(sid,pid,status,timestamp)));
+    await log(user.userId,"availability_bulk_changed",sid,{count:selected.length,status});result={count:selected.length};
   } else if(action==="generate"){
     const sid=requireValue(p.sessionId,"Session"),count=Number(p.teamCount),captains=p.captains;
     if(![2,3].includes(count)||!Array.isArray(captains)||!captains.every(x=>typeof x==="string"))throw new Error("Choose 2 or 3 captains.");
