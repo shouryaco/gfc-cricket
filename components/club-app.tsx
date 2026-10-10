@@ -20,6 +20,7 @@ const sel=(items:Player[],value:string,onChange:(s:string)=>void,label:string,ex
 export default function ClubApp({userName}:{userName:string}){
  const [deviceId,setDeviceId]=useState("");
  const knownSessionIds=useRef<Set<string>|null>(null);
+ const latestLoad=useRef(0);
  const [menuOpen,setMenuOpen]=useState(false);
  const [substituteId,setSubstituteId]=useState("");
  const [selectedAvailability,setSelectedAvailability]=useState<string[]>([]),[bulkStatus,setBulkStatus]=useState("available");
@@ -34,7 +35,7 @@ export default function ClubApp({userName}:{userName:string}){
  const [striker,setStriker]=useState(""),[non,setNon]=useState(""),[bowler,setBowler]=useState(""),[extraOpen,setExtraOpen]=useState(false),[wicketOpen,setWicketOpen]=useState(false);
  const [editOpen,setEditOpen]=useState(false),[editDelivery,setEditDelivery]=useState<Ball|null>(null),[editReason,setEditReason]=useState(""),[editPreview,setEditPreview]=useState<{before:{first:number;second:number};after:{first:number;second:number};result:string}|null>(null);
  const [extraType,setExtraType]=useState("wide"),[extraRuns,setExtraRuns]=useState(1),[batRuns,setBatRuns]=useState(0),[dismissed,setDismissed]=useState(""),[wicketType,setWicketType]=useState("caught"),[fielder,setFielder]=useState("");
- const load=useCallback(async()=>{try{const r=await fetch("/api/club",{cache:"no-store"}),j:State=await r.json();if(!r.ok)throw Error((j as State&{error?:string}).error||"Unable to load");const newest=j.sessions[0]?.id||"";const previous=knownSessionIds.current;setData(j);setSessionId(old=>!old||!j.sessions.some(s=>s.id===old)||previous&&newest&&!previous.has(newest)?newest:old);knownSessionIds.current=new Set(j.sessions.map(s=>s.id));setError("");setLoading(false)}catch(e){setError(e instanceof Error?e.message:"Unable to load");setLoading(false)}},[]);
+ const load=useCallback(async()=>{const request=++latestLoad.current;try{const r=await fetch("/api/club",{cache:"no-store"}),j:State=await r.json();if(!r.ok)throw Error((j as State&{error?:string}).error||"Unable to load");if(request!==latestLoad.current)return;const previous=knownSessionIds.current;const newDay=previous&&j.sessions.find(s=>!previous.has(s.id))?.id;const latest=j.sessions[0]?.id||"";setData(j);setSessionId(old=>newDay||(!old||!j.sessions.some(s=>s.id===old)?latest:old));knownSessionIds.current=new Set(j.sessions.map(s=>s.id));setError("");setLoading(false)}catch(e){if(request===latestLoad.current){setError(e instanceof Error?e.message:"Unable to load");setLoading(false)}}},[]);
  useEffect(()=>{const value=sessionStorage.getItem("gfc-device-id")||crypto.randomUUID();sessionStorage.setItem("gfc-device-id",value);setDeviceId(value);void load()},[load]);
  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)void load()},15000);const refresh=()=>{if(!document.hidden)void load()};document.addEventListener("visibilitychange",refresh);return()=>{clearInterval(timer);document.removeEventListener("visibilitychange",refresh)}},[load]);
  useEffect(()=>setSelectedAvailability([]),[sessionId]);
