@@ -113,18 +113,20 @@ export async function POST(request:Request){try{
     if(p.preview){result={score,teams}}else{await db().batch([db().prepare("UPDATE team_members SET team=? WHERE tournament_id=? AND player_id=?").bind(mb.team,tid,a),db().prepare("UPDATE team_members SET team=? WHERE tournament_id=? AND player_id=?").bind(ma.team,tid,b),db().prepare("UPDATE tournaments SET balance=?,version=version+1 WHERE id=?").bind(score,tid)]);await log(user.userId,"players_swapped",tid,{a,b,score});result={score}}
   } else if(action==="addLate"){
     const tid=requireValue(p.tournamentId,"Tournament"),t=await one<{session_id:string;status:string;team_count:number}>("SELECT * FROM tournaments WHERE id=?",tid);
-    if(!t||!["generated","locked"].includes(t.status))throw new Error("Late players can be added before matches start.");
-    if(await one("SELECT id FROM matches WHERE tournament_id=? AND status NOT IN ('scheduled')",tid))throw new Error("A match has already started. Team changes need a new match-day version.");
+    if(!t||!["generated","locked","final_ready"].includes(t.status))throw new Error("This tournament is complete. Create a new playing day to add players.");
     const pool=await rows<Player>("SELECT p.* FROM players p JOIN availability a ON a.player_id=p.id WHERE a.session_id=? AND a.status='available' AND p.active=1",t.session_id);
     const members=await rows<{player_id:string;team:string;captain:number}>("SELECT player_id,team,captain FROM team_members WHERE tournament_id=?",tid);
     const pending=pool.filter(x=>!members.some(m=>m.player_id===x.id));if(!pending.length)throw new Error("No new available players to place.");
     const names=["Team A","Team B","Team C"].slice(0,t.team_count),base:Team[]=names.map(name=>({name,captainId:members.find(m=>m.team===name&&m.captain)?.player_id||"",playerIds:members.filter(m=>m.team===name).map(m=>m.player_id)}));
-    const max=Math.ceil((members.length+pending.length)/t.team_count),candidates:Team[][]=[];
-    function visit(i:number,ts:Team[]){if(i===pending.length){if(Math.max(...ts.map(x=>x.playerIds.length))-Math.min(...ts.map(x=>x.playerIds.length))<=1)candidates.push(ts);return}
-      for(let k=0;k<ts.length;k++){if(ts[k].playerIds.length>=max)continue;const next=ts.map(x=>({...x,playerIds:[...x.playerIds]}));next[k].playerIds.push(pending[i].id);visit(i+1,next)}}
-    if(pending.length>8)throw new Error("Add up to eight late players at once.");visit(0,base);
-    const best=candidates.sort((a,b)=>balance(b,pool).score-balance(a,pool).score)[0];if(!best)throw new Error("No balanced placement is possible without moving existing players.");
-    const score=balance(best,pool).score,placements=pending.map(x=>({playerId:x.id,team:best.find(team=>team.playerIds.includes(x.id))!.name}));
+    const roster=await rows<Player>("SELECT p.* FROM players p JOIN team_members tm ON tm.player_id=p.id WHERE tm.tournament_id=?",tid);
+    const players=[...roster,...pending];
+    const gap=(teams:Team[])=>Math.max(...teams.map(x=>x.playerIds.length))-Math.min(...teams.map(x=>x.playerIds.length));
+    const withPlayer=(teams:Team[],index:number,playerId:string)=>teams.map((team,i)=>({...team,playerIds:i===index?[...team.playerIds,playerId]:[...team.playerIds]}));
+    const candidates:Team[][]=[];
+    if(pending.length<=8){function visit(i:number,teams:Team[]){if(i===pending.length){candidates.push(teams);return}for(let k=0;k<teams.length;k++)visit(i+1,withPlayer(teams,k,pending[i].id))}visit(0,base)}
+    else{let teams=base;for(const player of pending){teams=teams.map((_,index)=>withPlayer(teams,index,player.id)).sort((a,b)=>gap(a)-gap(b)||balance(b,players).score-balance(a,players).score)[0]}candidates.push(teams)}
+    const best=candidates.sort((a,b)=>gap(a)-gap(b)||balance(b,players).score-balance(a,players).score)[0];if(!best)throw new Error("No placement is possible for the current teams.");
+    const score=balance(best,players).score,placements=pending.map(x=>({playerId:x.id,team:best.find(team=>team.playerIds.includes(x.id))!.name}));
     if(p.preview)result={score,placements};else{const commands=placements.map(x=>db().prepare("INSERT INTO team_members (id,tournament_id,team,player_id,captain) VALUES (?,?,?,?,0)").bind(id(),tid,x.team,x.playerId));commands.push(db().prepare("UPDATE tournaments SET balance=?,version=version+1 WHERE id=?").bind(score,tid));await db().batch(commands);await log(user.userId,"late_players_added",tid,{placements,score});result={score,placements}}
   } else if(action==="rebalance"){
     const tid=requireValue(p.tournamentId,"Tournament"),t=await one<{session_id:string;status:string;team_count:number}>("SELECT * FROM tournaments WHERE id=?",tid);
