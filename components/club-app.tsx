@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CalendarDays, ChevronRight, ClipboardList, Gauge, Medal, Plus, RefreshCw, Shield, Swords, Users, Settings2, Share2, Menu, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -19,6 +19,7 @@ const name=(players:Player[],id:string|null)=>players.find(p=>p.id===id)?.short_
 const sel=(items:Player[],value:string,onChange:(s:string)=>void,label:string,exclude:string[]=[])=><label className="gfc-label min-w-36 flex-1">{label}<NativeSelect className="w-full" value={value} onChange={e=>onChange(e.target.value)}><option value="">Choose player</option>{items.filter(p=>!exclude.includes(p.id)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</NativeSelect></label>;
 export default function ClubApp({userName}:{userName:string}){
  const [deviceId,setDeviceId]=useState("");
+ const knownSessionIds=useRef<Set<string>|null>(null);
  const [menuOpen,setMenuOpen]=useState(false);
  const [substituteId,setSubstituteId]=useState("");
  const [data,setData]=useState<State>(empty),[tab,setTab]=useState("overview"),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
@@ -32,9 +33,9 @@ export default function ClubApp({userName}:{userName:string}){
  const [striker,setStriker]=useState(""),[non,setNon]=useState(""),[bowler,setBowler]=useState(""),[extraOpen,setExtraOpen]=useState(false),[wicketOpen,setWicketOpen]=useState(false);
  const [editOpen,setEditOpen]=useState(false),[editDelivery,setEditDelivery]=useState<Ball|null>(null),[editReason,setEditReason]=useState(""),[editPreview,setEditPreview]=useState<{before:{first:number;second:number};after:{first:number;second:number};result:string}|null>(null);
  const [extraType,setExtraType]=useState("wide"),[extraRuns,setExtraRuns]=useState(1),[batRuns,setBatRuns]=useState(0),[dismissed,setDismissed]=useState(""),[wicketType,setWicketType]=useState("caught"),[fielder,setFielder]=useState("");
- const load=useCallback(async()=>{try{const r=await fetch("/api/club",{cache:"no-store"}),j:any=await r.json();if(!r.ok)throw Error(j.error||"Unable to load");setData(j);setSessionId(old=>old||j.sessions[0]?.id||"");setLoading(false)}catch(e){setError(e instanceof Error?e.message:"Unable to load");setLoading(false)}},[]);
+ const load=useCallback(async()=>{try{const r=await fetch("/api/club",{cache:"no-store"}),j:State=await r.json();if(!r.ok)throw Error((j as State&{error?:string}).error||"Unable to load");const newest=j.sessions[0]?.id||"";const previous=knownSessionIds.current;setData(j);setSessionId(old=>!old||!j.sessions.some(s=>s.id===old)||previous&&newest&&!previous.has(newest)?newest:old);knownSessionIds.current=new Set(j.sessions.map(s=>s.id));setError("");setLoading(false)}catch(e){setError(e instanceof Error?e.message:"Unable to load");setLoading(false)}},[]);
  useEffect(()=>{const value=sessionStorage.getItem("gfc-device-id")||crypto.randomUUID();sessionStorage.setItem("gfc-device-id",value);setDeviceId(value);void load()},[load]);
- useEffect(()=>{if(tab!=="matches")return;const timer=setInterval(()=>void load(),12000);return()=>clearInterval(timer)},[tab,load]);
+ useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)void load()},15000);const refresh=()=>{if(!document.hidden)void load()};document.addEventListener("visibilitychange",refresh);return()=>{clearInterval(timer);document.removeEventListener("visibilitychange",refresh)}},[load]);
  async function act(action:string,payload:Record<string,unknown>={},success="Saved") {setBusy(true);setError("");setNotice("");try{const r=await fetch("/api/club",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,deviceId,...payload})}),j:any=await r.json();if(!r.ok)throw Error(j.error||"Unable to save");await load();setNotice(success);return j.result}catch(e){setError(e instanceof Error?e.message:"Unable to save");return null}finally{setBusy(false)}}
  const canAdmin=data.role==="admin",canScore=canAdmin||data.role==="scorer";
  const session=data.sessions.find(s=>s.id===sessionId),tournament=data.tournaments.find(t=>t.session_id===sessionId&&t.status!=="archived"),members=data.teamMembers.filter(m=>m.tournament_id===tournament?.id),matches=data.matches.filter(m=>m.tournament_id===tournament?.id).sort((a,b)=>a.number-b.number);
