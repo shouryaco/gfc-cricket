@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790670412756,
+      "tag": "0000_special_swordsman",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790670536041,
+      "tag": "0001_violet_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790670739752,
+      "tag": "0002_numerous_guardsmen",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790746332979,
+      "tag": "0003_common_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790746558956,
+      "tag": "0004_abnormal_shadow_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790747136605,
+      "tag": "0005_smooth_mister_fear",
+      "breakpoints": true
+    }
+  ]
+}
