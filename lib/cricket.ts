@@ -21,9 +21,9 @@ export function generateTeams(pool:Player[],captains:string[],teamCount:number){
   const rest=pool.filter(p=>!captains.includes(p.id)).sort((a,b)=>strength(b)-strength(a));
   for(const p of rest){let best=0,bestCost=Infinity;for(let i=0;i<teamCount;i++){if(initial[i].playerIds.length>=limits[i])continue;initial[i].playerIds.push(p.id);const cost=(100-balance(initial,pool).score)+initial[i].playerIds.length/limits[i]*2;initial[i].playerIds.pop();if(cost<bestCost){best=i;bestCost=cost}}initial[best].playerIds.push(p.id)}
   let current=initial; let score=balance(current,pool).score;
-  for(let pass=0;pass<12;pass++){let improved=false;for(let a=0;a<teamCount;a++)for(let b=a+1;b<teamCount;b++)for(const pa of current[a].playerIds)for(const pb of current[b].playerIds){if(captains.includes(pa)||captains.includes(pb))continue;
+  for(let pass=0;pass<12;pass++){let improved=false;search:for(let a=0;a<teamCount;a++)for(let b=a+1;b<teamCount;b++)for(const pa of current[a].playerIds)for(const pb of current[b].playerIds){if(captains.includes(pa)||captains.includes(pb))continue;
     const next=current.map(t=>({...t,playerIds:[...t.playerIds]}));next[a].playerIds[next[a].playerIds.indexOf(pa)]=pb;next[b].playerIds[next[b].playerIds.indexOf(pb)]=pa;
-    const s=balance(next,pool).score;if(s>score){current=next;score=s;improved=true}}if(!improved)break}
+    const s=balance(next,pool).score;if(s>score){current=next;score=s;improved=true;break search}}if(!improved)break}
   return {teams:current,...balance(current,pool)};
 }
 export function inningsScore(ds:Delivery[],innings:number){const rows=ds.filter(d=>d.active&&d.innings===innings).sort((a,b)=>a.sequence-b.sequence);return {runs:rows.reduce((s,d)=>s+d.bat_runs+d.extra_runs,0),wickets:rows.reduce((s,d)=>s+d.wicket,0),balls:rows.reduce((s,d)=>s+d.legal,0),rows};}
