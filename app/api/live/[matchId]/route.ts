@@ -25,7 +25,7 @@ export async function GET(_request:Request,{params}:{params:Promise<{matchId:str
       first:{runs:first.runs,wickets:first.wickets,overs:overs(first.balls)},second:{runs:second.runs,wickets:second.wickets,overs:overs(second.balls)},
       current:{team:batting,runs:current.runs,wickets:current.wickets,overs:overs(current.balls),legalBalls:current.balls,target,need:target===null?null:Math.max(0,target-current.runs),ballsRemaining,
         currentRate:current.balls?+(current.runs*6/current.balls).toFixed(2):0,requiredRate:target!==null&&ballsRemaining?+(Math.max(0,target-current.runs)*6/ballsRemaining).toFixed(2):null,
-        striker:player(m.striker_id),nonstriker:player(m.nonstriker_id),bowler:player(m.bowler_id),recent},
+        striker:player(m.striker_id),nonstriker:player(m.nonstriker_id),bowler:player(m.bowler_id),bowlerPending:!m.bowler_id&&["innings1","innings2"].includes(m.status)&&current.balls>0&&current.balls%6===0&&current.balls<m.overs*6&&(target===null||current.runs<target),previousBowler:player([...current.rows].reverse().find(d=>d.legal)?.bowler_id||null),recent},
       standings:standings(matchList,tournamentBalls,m).map(r=>({team:r.team,P:r.P,PTS:r.PTS,NRR:r.NRR})),impacts,scorecards,updatedAt:new Date().toISOString()});
   }catch{return Response.json({error:"Unable to load live score"},{status:500})}
 }

@@ -28,6 +28,17 @@ export function generateTeams(pool:Player[],captains:string[],teamCount:number){
 }
 export function inningsScore(ds:Delivery[],innings:number){const rows=ds.filter(d=>d.active&&d.innings===innings).sort((a,b)=>a.sequence-b.sequence);return {runs:rows.reduce((s,d)=>s+d.bat_runs+d.extra_runs,0),wickets:rows.reduce((s,d)=>s+d.wicket,0),balls:rows.reduce((s,d)=>s+d.legal,0),rows};}
 export function overs(balls:number){return `${Math.floor(balls/6)}.${balls%6}`}
+export function nextCrease(input:{strikerId:string;nonStrikerId:string;batRuns:number;extraRuns:number;extraType:string;legalBallsBefore:number;dismissedId?:string|null}){
+  const legal=!['wide','no_ball'].includes(input.extraType);
+  const running=input.batRuns+(['bye','leg_bye'].includes(input.extraType)?input.extraRuns:['wide','no_ball'].includes(input.extraType)?Math.max(0,input.extraRuns-1):0);
+  let strikerId:string|null=input.strikerId,nonStrikerId:string|null=input.nonStrikerId;
+  if(running%2===1)[strikerId,nonStrikerId]=[nonStrikerId,strikerId];
+  const overComplete=legal&&(input.legalBallsBefore+1)%6===0;
+  if(overComplete)[strikerId,nonStrikerId]=[nonStrikerId,strikerId];
+  if(strikerId===input.dismissedId)strikerId=null;
+  if(nonStrikerId===input.dismissedId)nonStrikerId=null;
+  return {strikerId,nonStrikerId,overComplete};
+}
 export function playerImpact(ds:Delivery[],playerId:string){const rows=ds.filter(d=>d.active),runs=rows.filter(d=>d.striker_id===playerId).reduce((s,d)=>s+d.bat_runs,0);
   const balls=rows.filter(d=>d.striker_id===playerId&&!["wide","no_ball"].includes(d.extra_type)).length;
   const wickets=rows.filter(d=>d.bowler_id===playerId&&d.wicket&&!["run_out","retired_out"].includes(d.wicket_type||"")).length;
