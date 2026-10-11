@@ -1,7 +1,7 @@
 import { getDatabase } from "@/db/adapter";
 import { getAdmin } from "@/app/admin-auth";
 export const runtime="nodejs";
-import { balance, generateTeams, inningsScore, playerImpact, standings, type Delivery, type Player, type Team } from "@/lib/cricket";
+import { balance, generateTeams, inningsScore, nextCrease, playerImpact, standings, type Delivery, type Player, type Team } from "@/lib/cricket";
 
 export const dynamic="force-dynamic";
 const db=()=>getDatabase();
@@ -34,8 +34,17 @@ export async function POST(request:Request){try{
   const p=await request.json() as Record<string,unknown>,action=String(p.action||"");
   const role="admin";
   const origin=request.headers.get("origin"),host=request.headers.get("host");if(origin&&new URL(origin).host!==host)return fail("Invalid request.",403);
+  if(action!=="resetTournament"){
+    if(typeof p.matchId==="string"&&await one("SELECT 1 FROM matches m JOIN tournaments t ON t.id=m.tournament_id WHERE m.id=? AND t.status='archived'",p.matchId))throw new Error("This tournament was reset. Select the new tournament.");
+    if(typeof p.tournamentId==="string"&&await one("SELECT 1 FROM tournaments WHERE id=? AND status='archived'",p.tournamentId))throw new Error("This tournament was reset. Select the new tournament.");
+  }
   let result:unknown={ok:true};
-  if(action==="claimScorer"){
+  if(action==="resetTournament"){
+    const tid=requireValue(p.tournamentId,"Tournament"),t=await one<{id:string;status:string}>("SELECT id,status FROM tournaments WHERE id=?",tid);
+    if(!t||t.status==="archived")throw new Error("Tournament is already reset.");
+    await db().batch([db().prepare("UPDATE tournaments SET status='archived',public_enabled=0 WHERE id=? AND status!='archived'").bind(tid),db().prepare("DELETE FROM scorer_leases WHERE match_id IN (SELECT id FROM matches WHERE tournament_id=?)").bind(tid)]);
+    await log(user.userId,"tournament_reset",tid,{previousStatus:t.status});result={id:tid};
+  } else if(action==="claimScorer"){
     const mid=requireValue(p.matchId,"Match"),deviceId=requireValue(p.deviceId,"Device");
     if(deviceId.length>100||!await one("SELECT id FROM matches WHERE id=? AND status!='complete'",mid))throw new Error("Match is unavailable for scoring.");
     const existing=await one<{device_id:string;expires_at:string}>("SELECT device_id,expires_at FROM scorer_leases WHERE match_id=?",mid);
@@ -168,7 +177,15 @@ export async function POST(request:Request){try{
     if(striker===non)throw new Error("Batters must be different.");await validateRoles(m,m.status==="innings1"?1:2,striker,non,bowler);
     const used=await rows<{dismissed_id:string}>("SELECT dismissed_id FROM deliveries WHERE match_id=? AND innings=? AND active=1 AND wicket=1",mid,m.status==="innings1"?1:2);
     if(used.some(x=>x.dismissed_id===striker||x.dismissed_id===non))throw new Error("A dismissed batter cannot return.");
-    await run("UPDATE matches SET striker_id=?,nonstriker_id=?,bowler_id=? WHERE id=?",striker,non,bowler,mid);
+    const revision=Number(p.revision);if(revision!==m.revision)throw new Error("The score changed on another device. Reload the crease.");
+    await run("UPDATE matches SET striker_id=?,nonstriker_id=?,bowler_id=?,revision=revision+1 WHERE id=? AND revision=?",striker,non,bowler,mid,revision);
+  } else if(action==="switchStrike"){
+    await requireScorerLease(requireValue(p.matchId,"Match"),p.deviceId);
+    const mid=requireValue(p.matchId,"Match"),m=await one<{status:string;revision:number;striker_id:string|null;nonstriker_id:string|null}>("SELECT status,revision,striker_id,nonstriker_id FROM matches WHERE id=?",mid);
+    if(!m||!["innings1","innings2"].includes(m.status)||!m.striker_id||!m.nonstriker_id)throw new Error("Choose two batters before switching strike.");
+    const revision=Number(p.revision);if(revision!==m.revision)throw new Error("The score changed on another device. Reload before switching strike.");
+    await run("UPDATE matches SET striker_id=?,nonstriker_id=?,revision=revision+1 WHERE id=? AND revision=?",m.nonstriker_id,m.striker_id,mid,revision);
+    await log(user.userId,"strike_switched",mid,{from:m.striker_id,to:m.nonstriker_id});
   } else if(action==="ball"){
     await requireScorerLease(requireValue(p.matchId,"Match"),p.deviceId);
     const mid=requireValue(p.matchId,"Match"),m=await one<any>("SELECT * FROM matches WHERE id=?",mid);if(!m||!["innings1","innings2"].includes(m.status))throw new Error("Match is not live.");
@@ -191,13 +208,11 @@ export async function POST(request:Request){try{
     await validateRoles(m,innings,m.striker_id,m.nonstriker_id,m.bowler_id);
     if(wicket)await validateFielder(m,innings,String(p.wicketType||""),p.fielderId);
     const legal=!(["wide","no_ball"].includes(type)),lastSequence=await one<{n:number}>("SELECT COALESCE(MAX(sequence),0) AS n FROM deliveries WHERE match_id=?",mid),seq=(lastSequence?.n||0)+1,did=id();
-    const rotate=(bat+(type==="bye"||type==="leg_bye"?extra:0)+(type==="wide"||type==="no_ball"?Math.max(0,extra-1):0))%2===1;
-    let striker=rotate?m.nonstriker_id:m.striker_id,non=rotate?m.striker_id:m.nonstriker_id;
-    if(legal&&(s.balls+1)%6===0)[striker,non]=[non,striker];
-    if(dismissed){if(striker===dismissed)striker=null;if(non===dismissed)non=null}
+    const next=nextCrease({strikerId:m.striker_id,nonStrikerId:m.nonstriker_id,batRuns:bat,extraRuns:extra,extraType:type,legalBallsBefore:s.balls,dismissedId:dismissed});
+    const striker=next.strikerId,non=next.nonStrikerId;
     const target=targetBefore,allOut=s.wickets+wicket>=wicketLimit,done=legal&&s.balls+1>=m.overs*6||allOut||target!==null&&s.runs+bat+extra>=target;
     const statements=[db().prepare("INSERT INTO deliveries (id,match_id,innings,sequence,striker_id,nonstriker_id,bowler_id,bat_runs,extra_type,extra_runs,wicket,dismissed_id,wicket_type,fielder_id,legal,active,actor_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)").bind(did,mid,innings,seq,scoreBatter,m.nonstriker_id,m.bowler_id,bat,type,extra,wicket,dismissed,p.wicketType||null,p.fielderId||null,Number(legal),user.userId,now()),
-      db().prepare("UPDATE matches SET revision=revision+1,striker_id=?,nonstriker_id=?,bowler_id=? WHERE id=? AND revision=?").bind(striker,non,legal&&(s.balls+1)%6===0?null:m.bowler_id,mid,expected)];
+      db().prepare("UPDATE matches SET revision=revision+1,striker_id=?,nonstriker_id=?,bowler_id=? WHERE id=? AND revision=?").bind(striker,non,next.overComplete?null:m.bowler_id,mid,expected)];
     await db().batch(statements);await log(user.userId,"delivery_recorded",mid,{did,innings,bat,extra,type,wicket});result={done,score:s.runs+bat+extra,balls:s.balls+Number(legal)};
   } else if(action==="undo"){
     await requireScorerLease(requireValue(p.matchId,"Match"),p.deviceId);
@@ -264,9 +279,7 @@ export async function POST(request:Request){try{
         }
       }else{
         let striker=m.striker_id,non=m.nonstriker_id,bowler=m.bowler_id;
-        if(!later.length&&m.status===`innings${old.innings}`){const rotate=physicalRuns(bat,extra,type)%2===1;striker=rotate?old.nonstriker_id:old.striker_id;non=rotate?old.striker_id:old.nonstriker_id;
-          if(legal&&inningsScore(revised,old.innings).balls%6===0)[striker,non]=[non,striker];
-          if(dismissed===striker)striker=null;if(dismissed===non)non=null;if(legal&&inningsScore(revised,old.innings).balls%6===0)bowler=null}
+        if(!later.length&&m.status===`innings${old.innings}`){const next=nextCrease({strikerId:old.striker_id,nonStrikerId:old.nonstriker_id,batRuns:bat,extraRuns:extra,extraType:type,legalBallsBefore:inningsScore(revised,old.innings).balls-legal,dismissedId:dismissed});striker=next.strikerId;non=next.nonStrikerId;if(next.overComplete)bowler=null}
         commands.push(db().prepare("UPDATE matches SET revision=revision+1,striker_id=?,nonstriker_id=?,bowler_id=? WHERE id=? AND revision=?").bind(striker,non,bowler,mid,m.revision));
       }
       await db().batch(commands);await log(user.userId,"delivery_corrected",mid,{deliveryId,reason,before:summary.before,after:summary.after});result=summary;
