@@ -1,5 +1,5 @@
 import { getDatabase } from "@/db/adapter";
-import { getAdmin } from "@/app/admin-auth";
+import { getAdmin } from "@/app/admin-auth"; 
 export const runtime="nodejs";
 import { balance, generateTeams, inningsScore, playerImpact, standings, type Delivery, type Player, type Team } from "@/lib/cricket";
 
