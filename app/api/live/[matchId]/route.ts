@@ -18,11 +18,14 @@ export async function GET(_request:Request,{params}:{params:Promise<{matchId:str
     const recent=current.rows.slice(-8).map(d=>({id:d.id,runs:d.bat_runs+d.extra_runs,wicket:!!d.wicket,extraType:d.extra_type}));
     const player=(id:string|null)=>players.find(p=>p.id===id)?.short_name||null;
     const impacts=players.map(p=>({name:p.short_name,team:p.team,...playerImpact(ds,p.id)})).filter(x=>x.runs||x.wickets||x.catches);
+    const scorecards=[m.team_a,m.team_b].map((team:string)=>{const inning=team===m.batting_first?1:2,battingBalls=ds.filter(d=>d.innings===inning),fieldingBalls=ds.filter(d=>d.innings!==inning),teamScore=inningsScore(ds,inning);
+      return {team,runs:teamScore.runs,wickets:teamScore.wickets,overs:overs(teamScore.balls),players:players.filter(p=>p.team===team).map(p=>{const bat=playerImpact(battingBalls,p.id),field=playerImpact(fieldingBalls,p.id);return {id:p.id,name:p.short_name,runs:bat.runs,balls:bat.balls,wickets:field.wickets,catches:field.catches}})};
+    });
     return Response.json({match:{id:m.id,number:m.number,stage:m.stage,teamA:m.team_a,teamB:m.team_b,status:m.status,result:m.result,tossWinner:m.toss_winner,tossChoice:m.toss_choice,overs:m.overs},
       first:{runs:first.runs,wickets:first.wickets,overs:overs(first.balls)},second:{runs:second.runs,wickets:second.wickets,overs:overs(second.balls)},
       current:{team:batting,runs:current.runs,wickets:current.wickets,overs:overs(current.balls),legalBalls:current.balls,target,need:target===null?null:Math.max(0,target-current.runs),ballsRemaining,
         currentRate:current.balls?+(current.runs*6/current.balls).toFixed(2):0,requiredRate:target!==null&&ballsRemaining?+(Math.max(0,target-current.runs)*6/ballsRemaining).toFixed(2):null,
         striker:player(m.striker_id),nonstriker:player(m.nonstriker_id),bowler:player(m.bowler_id),recent},
-      standings:standings(matchList,tournamentBalls,m).map(r=>({team:r.team,P:r.P,PTS:r.PTS,NRR:r.NRR})),impacts,updatedAt:new Date().toISOString()});
+      standings:standings(matchList,tournamentBalls,m).map(r=>({team:r.team,P:r.P,PTS:r.PTS,NRR:r.NRR})),impacts,scorecards,updatedAt:new Date().toISOString()});
   }catch{return Response.json({error:"Unable to load live score"},{status:500})}
 }
